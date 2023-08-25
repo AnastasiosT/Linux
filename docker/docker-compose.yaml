@@ -1,0 +1,151 @@
+version: '3'
+services:
+  openldap:
+
+    #image: thanos/openldap:latest
+    image: osixia/openldap:latest
+    container_name: openldap
+    command: [--copy-service, --loglevel, debug]
+    environment:
+      LDAP_LOG_LEVEL: "256"
+      LDAP_ORGANISATION: "Tribe29 Inc."
+      LDAP_DOMAIN: "cmk.dev.de"
+      LDAP_BASE_DN: "dc=cmk,dc=dev,dc=de"
+      LDAP_ADMIN_PASSWORD: "cmk"
+      LDAP_CONFIG_PASSWORD: "cmk"
+      LDAP_READONLY_USER: "true"
+      LDAP_RFC2307BIS_SCHEMA: "false"
+      LDAP_BACKEND: "mdb"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: "ldap.crt"
+      LDAP_TLS_KEY_FILENAME: "ldap.key"
+      LDAP_TLS_DH_PARAM_FILENAME: "dhparam.pem"
+      LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+      LDAP_TLS_ENFORCE: "false"
+      LDAP_TLS_CIPHER_SUITE: "SECURE256:-VERS-SSL3.0"
+      LDAP_TLS_VERIFY_CLIENT: "demand"
+      KEEP_EXISTING_CONFIG: "false"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "false"
+      LDAP_SSL_HELPER_PREFIX: "openldap"
+    tty: true
+    stdin_open: true
+    volumes:
+      - /var/lib/ldap
+      # you can enable this, to override the default ldif structure
+      - ./openldap/org.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/org.ldif
+      - /etc/ldap/slapd.d
+      - /container/service/slapd/assets/certs/
+    networks:
+      openldap:
+    ports:
+      - "389:389"
+      - "636:636"
+    # For replication to work correctly, domainname and hostname must be
+    # set correctly so that "hostname"."domainname" equates to the
+    # fully-qualified domain name for the host.
+    #domainname: "cmk.dev.de"
+    #hostname: "ldap-server"
+  phpldapadmin:
+    #image: thanos/phpldapadmin:latest
+    image: osixia/phpldapadmin:latest
+    container_name: phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8080:80"
+    depends_on:
+      - openldap
+    networks:
+      openldap:
+  mysql:
+    container_name: mysql
+    image: ubuntu:latest
+    volumes:
+      - ./mysql/mysql_compose.sh:/usr/local/bin/mysql.sh
+      - ./check-mk-agent_2.1.0p14_all.deb:/tmp/check-mk-agent_2.1.0p14_all.deb
+      - ./mysql/mk_mysql:/tmp/mk_mysql
+      - ./mysql/mysql.cfg:/etc/check_mk/mysql.cfg
+    command: mysql.sh
+  step-ca:
+    container_name: step-ca
+    image: ubuntu:latest
+      #image: smallstep/step-ca
+    volumes:
+      - ./step-ca/step-ca.sh:/usr/local/bin/step-ca.sh 
+      - ./step-ca/certificates:/home/step
+    command: step-ca.sh
+    environment:
+      - TZ="America/New_York"
+      - DOCKER_STEPCA_INIT_NAME="Smallstep"
+      - "DOCKER_STEPCA_INIT_DNS_NAMES=localhost"
+      - DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT="true"
+    ports:
+      - "9443:9443"
+  grafana:
+    ports:
+      - "3000:3000"
+    container_name: grafana
+    image: grafana/grafana-enterprise:latest
+    volumes:
+      - grafana-storage:/var/lib/grafana
+      - ./ssl:/var/ssl
+    user: "0"
+      #depends_on:
+      #- influxdb
+      #networks:
+      #- openldap
+    environment:
+      - "GF_INSTALL_PLUGINS=https://github.com/Checkmk/grafana-checkmk-datasource/releases/download/v3.1.0-beta.1/tribe-29-checkmk-datasource-3.1.0-beta.1.zip;checkmk-datasource,grafana-simple-json-datasource" 
+      - "GF_SECURITY_ADMIN_USER=cmkadmin"
+      - "GF_SECURITY_ADMIN_PASSWORD=cmk" 
+
+
+  influxdb:
+    image: influxdb:2.4
+    ports:
+      - '8086:8086'
+    volumes:
+      - influxdb-storage:/var/lib/influxdb
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=cmk
+      - DOCKER_INFLUXDB_INIT_PASSWORD=cmk1234567
+      - DOCKER_INFLUXDB_INIT_ORG=myorg
+      - DOCKER_INFLUXDB_INIT_BUCKET=mybucket
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=mytoken
+  ntopng:
+    #image: vimagick/ntopng
+    image: ntop/ntopng.dev 
+    command: --community -d /var/lib/ntopng -i lo -i enx3448edd21d91 -i wlo1 -i tun0 -r 127.0.0.1:6379@0 -w 127.0.0.1:3000
+    volumes:
+      - ./data/ntopng:/var/lib/ntopng
+    network_mode: host
+    restart: unless-stopped
+
+  redis:
+    image: redis:alpine
+    command: --save 900 1
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - ./data/redis:/data
+    restart: unless-stopped
+
+
+volumes:
+ certificates:
+ grafana-storage:
+ influxdb-storage:
+ chronograf-storage:
+networks:
+  openldap:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/16
+          gateway: 172.31.0.1
+
+secrets:
+  password:
+    file: ./password.txt
