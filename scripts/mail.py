@@ -12,7 +12,7 @@ try:
     session.ehlo()
     session.starttls()
     session.ehlo()
-    session.login(sender,'Office365@Stuttgart')
+    session.login(sender,'XXX')
     session.sendmail(sender,receiver,message)
     session.quit()
 
