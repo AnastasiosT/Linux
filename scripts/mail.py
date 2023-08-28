@@ -3,11 +3,12 @@
 import smtplib
 
 sender = "anastasios-thomaidis@tt-bezirk-stuttgart.de"
-receiver = ["anastasios.thomaidis@checkmk.com"]
+receiver = ["adam.kangiser@checkmk.com"]
 message = "Hello!"
 
 try:
     session = smtplib.SMTP('smtp.office365.com',587)
+    session.set_debuglevel(2)
     session.ehlo()
     session.starttls()
     session.ehlo()
