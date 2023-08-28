@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 
 import smtplib
+## https://docs.python.org/3/library/smtplib.html 
+
 
 sender = "anastasios-thomaidis@tt-bezirk-stuttgart.de"
 receiver = ["adam.kangiser@checkmk.com"]
