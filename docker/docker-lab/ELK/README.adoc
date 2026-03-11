@@ -1,0 +1,17 @@
+= logstashing nagios/cmc history file into ELK
+
+* run ELK in a docker container e.g. from https://elk-docker.readthedocs.io/
+* install logstash on your desktop/laptop as well
+
+== Example
+
+* put the cmc/nagios history file you want to analyse to SUP-16932.history.log
+* review the logstash config SUP-16932.history.cfg
+* run logstash with this config
+
+.run
+----
+./run-history-arg.sh SUP-16932.history.cfg
+----
+
+TIP: Logstash is very slow to start up, it takes up to ~30 seconds on my laptop.

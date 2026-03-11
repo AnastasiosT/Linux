@@ -1,0 +1,19 @@
+services:
+  snmpsim:
+    image: tandrup/snmpsim
+    container_name: snmpsim
+    network_mode: bridge
+    ports:
+      - "161:161"
+    environment:
+      EXTRA_FLAGS: >-
+        --logging-method=syslog:local1:debug:klapp-0130:514:udp
+        --logging-method=file:/var/log/snmpsimd.log
+        --v3-user=testing
+        --v3-auth-key=${SNMPSIM_V3_AUTH_KEY}
+        --v3-auth-proto=SHA512
+        --v3-priv-key=${SNMPSIM_V3_PRIV_KEY}
+        --v3-priv-proto=AES128
+    restart: unless-stopped
+    extra_hosts:
+      - "klapp-0130:172.17.0.1"

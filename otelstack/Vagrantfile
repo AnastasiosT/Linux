@@ -1,0 +1,83 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+ENV['VAGRANT_DEFAULT_PROVIDER'] = 'libvirt'
+ENV['VAGRANT_NO_PARALLEL'] = 'yes'
+
+Vagrant.configure("2") do |config|
+  config.vm.define "otelstack", primary: true do |srv|
+    srv.vm.box = "bento/ubuntu-24.04"
+    srv.vm.disk :disk, size: "200GB", primary: true
+
+    srv.vm.network :private_network,
+      :ip                       => "192.168.123.112",
+      :libvirt__netmask         => "255.255.255.0",
+      :libvirt__network_name    => "otelstack",
+      :libvirt__network_address => "192.168.123.0"
+
+    srv.ssh.insert_key = false
+
+    srv.vm.provider "libvirt" do |libv|
+      libv.default_prefix = "test_"
+      libv.description    = "otelstack"
+      libv.memory         = 6144
+      libv.cpus           = 4
+      libv.title          = "otelstack"
+      libv.keymap         = "en-us"
+      libv.memorybacking :access, :mode => "shared"
+      libv.memorybacking :source, :type => "memfd"
+    end
+
+    # ----------------------------------------------------------
+    # Copy config files into the VM
+    # ----------------------------------------------------------
+    srv.vm.provision "shell", inline: "mkdir -p /home/vagrant/docker/{otel,snmpsim,demo-app}", privileged: false
+
+    srv.vm.provision "file", source: "./docker/otel/docker-compose.yml", destination: "/home/vagrant/docker/otel/docker-compose.yml"
+    srv.vm.provision "file", source: "./docker/otel/otel-collector-config.yaml_withoutlogs", destination: "/home/vagrant/docker/otel/otel-collector-config.yaml_withoutlogs"
+    srv.vm.provision "file", source: "./docker/otel/otel-collector-config.yaml_withlogs", destination: "/home/vagrant/docker/otel/otel-collector-config.yaml"
+    srv.vm.provision "file", source: "./docker/otel/README.md", destination: "/home/vagrant/docker/otel/README.md"
+    srv.vm.provision "file", source: "./docker/snmpsim/docker-compose.yaml", destination: "/home/vagrant/docker/snmpsim/docker-compose.yaml"
+    srv.vm.provision "file", source: "./docker/demo-app", destination: "/home/vagrant/docker/demo-app"
+
+    # ----------------------------------------------------------
+    # Install packages, Docker, and start containers
+    # ----------------------------------------------------------
+    srv.vm.provision "shell", inline: <<-SHELL
+      set -euo pipefail
+
+      echo ">>> Installing base packages..."
+      apt-get -y update --quiet
+      apt-get -y install --no-install-recommends vim htop curl wget git
+
+      echo ">>> Installing Docker..."
+      curl -fsSL https://get.docker.com | sh
+      apt-get -y install docker-compose-plugin
+      usermod -aG docker vagrant
+
+      # ----------------------------------------------------------
+      # Fix OTel collector endpoint to point at the host Checkmk.
+      # The libvirt NAT gateway is the host from the VM's perspective.
+      # ----------------------------------------------------------
+      GATEWAY=$(ip route | awk '/default/ {print $3}')
+      echo ">>> Detected gateway (host): ${GATEWAY}"
+      sed -i "s|__CHECKMK_ENDPOINT__|${GATEWAY}:4317|g" \
+        /home/vagrant/docker/otel/otel-collector-config.yaml \
+        /home/vagrant/docker/otel/otel-collector-config.yaml_withoutlogs
+
+      sed -i "s|__CHECKMK_TRACES_ENDPOINT__|${GATEWAY}:4417|g" \
+        /home/vagrant/docker/otel/otel-collector-config.yaml \
+        /home/vagrant/docker/otel/otel-collector-config.yaml_withoutlogs
+
+      echo ">>> Starting snmpsim..."
+      cd /home/vagrant/docker/snmpsim && docker compose up -d
+
+      echo ">>> Starting OTel stack..."
+      cd /home/vagrant/docker/otel && docker compose up -d
+
+      echo ">>> Building and starting demo app..."
+      cd /home/vagrant/docker/demo-app && docker compose up -d --build
+
+      echo ">>> Done! All containers started."
+    SHELL
+  end
+end

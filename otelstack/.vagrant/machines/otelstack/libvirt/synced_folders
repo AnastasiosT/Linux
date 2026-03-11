@@ -1,0 +1,1 @@
+{"rsync":{"/vagrant":{"guestpath":"/vagrant","hostpath":"/home/anastasios/vagrant/kvm/otelstack","disabled":false,"__vagrantfile":true,"owner":"vagrant","group":"vagrant"}}}

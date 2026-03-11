@@ -1,0 +1,23 @@
+# Initial setup
+mkdir n8n && cd n8n
+# Create the 3 files above
+
+# First run
+docker compose up -d
+
+# Check logs
+docker compose logs -f
+
+# Update (later)
+chmod +x update-n8n.sh
+./update-n8n.sh
+
+
+# Import new  workflows
+➜  n8n sudo docker exec -it n8n n8n import:workflow --input=/opt/n8n-examples/example-workflow.json
+➜  n8n ls workflows 
+example-workflow.json  monitoring-workflow.json
+➜  n8n sudo docker exec -it n8n n8n import:workflow --input=/opt/n8n-examples/monitoring-workflow.json
+Importing 1 workflows...
+Successfully imported 1 workflow.
+

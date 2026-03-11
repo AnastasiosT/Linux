@@ -1,0 +1,10 @@
+services:
+  ntopng:
+    image: ntop/ntopng
+    container_name: ntopng
+    network_mode: host
+    command: -d /var/lib/ntopng
+    volumes:
+      - ../data/ntopng:/var/lib/ntopng
+      - /etc/ntopng.license:/etc/ntopng.license:ro
+    restart: unless-stopped

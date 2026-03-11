@@ -1,0 +1,11 @@
+services:
+  proxy:
+    image: ubuntu/squid
+    container_name: proxy
+    network_mode: bridge
+    ports:
+      - "3128:3128"
+    environment:
+      TZ: UTC
+    volumes:
+      - ./squid.conf:/etc/squid/squid.conf

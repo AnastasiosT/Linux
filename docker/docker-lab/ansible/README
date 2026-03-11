@@ -1,0 +1,26 @@
+ansible -i inventory.yaml all -m ping
+
+ansible-playbook -i inventory.yaml ldap_playbook.yaml --tags "start containers, debug"
+
+ansible-playbook -i inventory.yaml ldap_playbook.yaml --skip-tags "delete containers"
+
+ansible-playbook -i inventory.yaml ldap_playbook.yaml --tags "delete containers"
+
+
+
+/home/checkmk/config/create_ldap_connection.sh
+
+
+#!/bin/bash
+
+
+
+cp /home/checkmk/config/user_connections.mk /omd/sites/ldap/etc/check_mk/multisite.d/wato/user_connections.mk
+chown ldap. /omd/sites/ldap/etc/check_mk/multisite.d/wato/user_connections.mk
+
+
+
+cp /home/cert/root_ca.crt /usr/local/share/ca-certificates/
+update-ca-certificates
+omd restart ldap
+

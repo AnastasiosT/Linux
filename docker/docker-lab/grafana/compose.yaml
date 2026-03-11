@@ -1,0 +1,28 @@
+services:
+  grafana:
+    image: grafana/grafana-enterprise:latest
+    container_name: grafana
+    network_mode: bridge
+    user: "0"
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-db:/var/lib/grafana
+      - grafana-plugins:/var/lib/grafana/plugins
+      - ./klapp_0130.crt:/usr/local/share/ca-certificates/klapp_0130.crt
+      - ./root_ca.crt:/usr/local/share/ca-certificates/root_ca.crt
+      - ./grafana.ini:/etc/grafana/grafana.ini
+      - ./intermediate_ca.crt:/usr/local/share/ca-certificates/intermediate_ca.crt
+    extra_hosts:
+      - "klapp-0130:172.17.0.1"
+    environment:
+      GF_INSTALL_PLUGINS: "https://github.com/Checkmk/grafana-checkmk-datasource/releases/download/v3.3.0/tribe-29-checkmk-datasource-3.3.0.zip;tribe29-checkmk-datasource,grafana-simple-json-datasource"
+      GF_SECURITY_ADMIN_USER: cmkadmin
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+      GF_LOG_LEVEL: debug
+      GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS: tribe-29-checkmk-datasource
+      GF_APP_TLS_SKIP_VERIFY_INSECURE: "true"
+
+volumes:
+  grafana-db:
+  grafana-plugins:

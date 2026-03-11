@@ -1,0 +1,69 @@
+receivers:
+  # Scrape Prometheus node exporter for system metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: node-exporter
+          scrape_interval: 30s
+          static_configs:
+            - targets:
+                - node-exporter:9100
+
+  # Collect host metrics from the collector container itself
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      memory:
+      disk:
+      filesystem:
+      network:
+      load:
+
+processors:
+  batch:
+    timeout: 10s
+  
+  # Add resource attributes to identify the source
+  resource:
+    attributes:
+      - key: service.name
+        value: docker-metrics-collector
+        action: upsert
+      - key: deployment.environment
+        value: testing
+        action: upsert
+      - key: host.name
+        value: docker-host
+        action: upsert
+
+exporters:
+  # Send to Checkmk on the same host
+  otlp/checkmk:
+    endpoint: "192.168.178.25:4317"
+    tls:
+      insecure: true
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+  
+  # Debug output to see what's being sent
+  debug:
+    verbosity: normal
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  pipelines:
+    metrics:
+      receivers:
+        - prometheus
+        - hostmetrics
+      processors:
+        - resource
+        - batch
+      exporters:
+        - debug
+        - otlp/checkmk

@@ -1,0 +1,7 @@
+services:
+  ipmi-sim:
+    image: vaporio/ipmi-simulator
+    container_name: ipmi-sim
+    ports:
+      - "623:623/udp"
+    restart: unless-stopped

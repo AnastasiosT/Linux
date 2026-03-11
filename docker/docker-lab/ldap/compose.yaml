@@ -1,0 +1,62 @@
+services:
+  openldap:
+    image: osixia/openldap:latest
+    container_name: openldap
+    hostname: openldap.local
+    command: [--copy-service, --loglevel, debug]
+    tty: true
+    stdin_open: true
+    environment:
+      LDAP_LOG_LEVEL: "256"
+      LDAP_ORGANISATION: "Tribe29 Inc."
+      LDAP_DOMAIN: "cmk.dev.de"
+      LDAP_BASE_DN: "dc=cmk,dc=dev,dc=de"
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      LDAP_CONFIG_PASSWORD: ${LDAP_CONFIG_PASSWORD}
+      LDAP_READONLY_USER: "true"
+      LDAP_RFC2307BIS_SCHEMA: "false"
+      LDAP_BACKEND: "mdb"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: openldap.crt
+      LDAP_TLS_KEY_FILENAME: openldap_nopass.key
+      LDAP_TLS_DH_PARAM_FILENAME: dhparam.pem
+      LDAP_TLS_CA_CRT_FILENAME: root_ca.crt
+      LDAP_TLS_ENFORCE: "false"
+      LDAP_TLS_CIPHER_SUITE: "SECURE128:-VERS-SSL3.0:+VERS-TLS1.2"
+      LDAP_TLS_PROTOCOL_MIN: "1.2"
+      LDAP_TLS_VERIFY_CLIENT: "try"
+      KEEP_EXISTING_CONFIG: "false"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "false"
+      LDAP_SSL_HELPER_PREFIX: openldap
+    volumes:
+      - /var/lib/ldap
+      - ../openldap/org.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/org.ldif
+      - ../openldap/cert:/container/service/slapd/assets/certs
+      - /etc/ldap/slapd.d
+    ports:
+      - "389:389"
+      - "636:636"
+    networks:
+      - ldap
+
+  # Host port changed from 8080 to 8081 — conflict with checkmk
+  phpldapadmin:
+    image: osixia/phpldapadmin:latest
+    container_name: phpldapadmin
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap
+      PHPLDAPADMIN_HTTPS: "false"
+    ports:
+      - "8081:80"
+    depends_on:
+      - openldap
+    networks:
+      - ldap
+
+networks:
+  ldap:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
+          gateway: 172.18.0.1

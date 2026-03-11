@@ -1,0 +1,49 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: snipeit-mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_DATABASE=snipeit
+      - MYSQL_USER=snipeit
+      - MYSQL_PASSWORD=snipeit
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - snipeit-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+    restart: unless-stopped
+
+  snipeit:
+    image: snipe/snipe-it:latest
+    container_name: snipeit
+    ports:
+      - "8000:80"
+    environment:
+      - APP_ENV=production
+      - APP_URL=http://localhost:8000
+      - APP_KEY=base64:gDo1XP3+cAQ9vwINo1ULMCRsHjz2lXClZ/mYpgenoF8=
+      - DB_CONNECTION=mysql
+      - DB_HOST=mysql
+      - DB_DATABASE=snipeit
+      - DB_USERNAME=snipeit
+      - DB_PASSWORD=snipeit
+    depends_on:
+      mysql:
+        condition: service_healthy
+    volumes:
+      - snipeit_data:/var/lib/snipeit
+    networks:
+      - snipeit-network
+    restart: unless-stopped
+
+volumes:
+  snipeit_data:
+  mysql_data:
+
+networks:
+  snipeit-network:
+    driver: bridge

@@ -1,0 +1,79 @@
+version: '3'
+services:
+  snmpsim:
+    extends:
+      file: snmpsim.yaml
+      service: snmpsim
+  proxy:
+    extends:
+      file: proxy.yaml
+      service: proxy
+  thanos:
+    container_name: thanos
+    image: thanos/extend-osixia-openldap:0.1.0
+    restart: on-failure
+  openldap:
+     extends:
+      file: openldap.yaml
+      service: openldap
+
+  phpldapadmin:
+    extends:
+      file: phpldapadmin.yaml
+      service: phpldapadmin
+  mysql:
+    extends:
+      file: mysql.yaml
+      service: mysql
+  step-ca:
+    extends:
+      file: step-ca.yaml
+      service: step-ca
+  grafana:
+    extends:
+      file: grafana.yaml
+      service: grafana
+
+
+  influxdb:
+    extends:
+      file: influxdb.yaml
+      service: influxdb
+  ntopng:
+    extends:
+      file: ntop.yaml
+      service: ntopng
+  redis:
+    extends: 
+      file: redis.yaml
+      service: redis
+  redis_insight:
+    extends:
+      file: redis.yaml
+      service: redis_insight
+
+
+volumes:
+ certificates:
+ grafana-storage:
+ influxdb-storage:
+ redis_volume_data:
+ redis_insight_volume_data:
+networks:
+  openldap:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.60.0.0/16
+          gateway: 172.60.0.1
+            #default:
+            #driver: bridge
+            #ipam:
+            #config:
+            #- subnet: 192.168.3.0/24
+            #gateway: 192.168.3.1
+
+
+secrets:
+  password:
+    file: ./password.txt

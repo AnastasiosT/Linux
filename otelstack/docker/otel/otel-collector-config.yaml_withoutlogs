@@ -1,0 +1,89 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: node-exporter
+          scrape_interval: 30s
+          static_configs:
+            - targets: [127.0.0.1:9100]
+
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      memory:
+      disk:
+      filesystem:
+      network:
+      load:
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1000
+
+  resource:
+    attributes:
+      - key: service.name
+        value: docker-metrics-collector
+        action: insert   # insert preserves app service names
+      - key: deployment.environment
+        value: testing
+        action: upsert
+      - key: host.name
+        value: docker-host
+        action: upsert
+
+exporters:
+  # __CHECKMK_ENDPOINT__ / __CHECKMK_TRACES_ENDPOINT__ replaced by Vagrantfile provisioner
+  otlp_grpc/checkmk:
+    endpoint: "__CHECKMK_ENDPOINT__"
+    tls:
+      insecure: true
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+
+  otlp_grpc/checkmk-traces:
+    endpoint: "__CHECKMK_TRACES_ENDPOINT__"
+    tls:
+      insecure: true
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+
+  debug:
+    verbosity: basic
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  telemetry:
+    logs:
+      level: warn
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug, otlp_grpc/checkmk-traces]
+
+    metrics:
+      receivers: [prometheus, hostmetrics, otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [debug, otlp_grpc/checkmk]

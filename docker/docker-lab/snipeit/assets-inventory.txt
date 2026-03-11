@@ -1,0 +1,23 @@
+# Asset inventory for CMDB
+# Format: hostname:ip:os_type:description
+# Lines starting with # are ignored
+
+# Web Servers
+web-prod-01:192.168.1.10:linux:Production Web Server
+web-prod-02:192.168.1.11:linux:Production Web Server (Backup)
+
+# Database Servers
+db-prod-01:192.168.1.20:linux:Production Database Server
+db-prod-02:192.168.1.21:linux:Database Replica Server
+
+# Application Servers
+app-prod-01:192.168.1.30:linux:Production Application Server
+app-prod-02:192.168.1.31:linux:Application Server (Backup)
+
+# Windows Servers
+win-dc-01:192.168.1.40:windows:Windows Domain Controller
+win-file-01:192.168.1.41:windows:Windows File Server
+
+# Network Devices
+switch-core-01:192.168.1.254:network:Core Network Switch
+router-edge-01:192.168.1.253:network:Edge Router

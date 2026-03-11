@@ -1,0 +1,22 @@
+services:
+  # frontend: accepts HTTP order requests, calls backend, runs built-in load generator
+  # Traces visible at http://<VM-IP>:5000/order?item=laptop
+  frontend:
+    build: ./frontend
+    container_name: demo-frontend
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - BACKEND_URL=http://localhost:5001
+      - OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+
+  # backend: handles inventory lookups and order processing with simulated DB spans
+  backend:
+    build: ./backend
+    container_name: demo-backend
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+    depends_on:
+      - frontend

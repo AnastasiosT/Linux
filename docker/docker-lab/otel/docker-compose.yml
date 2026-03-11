@@ -1,0 +1,54 @@
+services:
+  # Prometheus node exporter - generates real system metrics
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - otel-network
+
+  # OTel Collector - scrapes metrics AND collects logs, sends to Checkmk
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: otel-collector
+    restart: unless-stopped
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    user: "0:0"
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/var/log:ro
+    network_mode: "host"
+    depends_on:
+      - node-exporter
+
+  # Prometheus server
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:9090:9090"
+    networks:
+      - otel-network
+    # Optional: Add volumes for config and data persistence
+    # volumes:
+    #   - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    #   - prometheus-data:/prometheus
+
+networks:
+  otel-network:
+    driver: bridge
+
+# Optional: Uncomment to persist Prometheus data
+# volumes:
+#   prometheus-data:

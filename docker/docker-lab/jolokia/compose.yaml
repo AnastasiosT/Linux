@@ -1,0 +1,14 @@
+services:
+  jolokia:
+    image: bodsch/docker-jolokia
+    container_name: jolokia
+    network_mode: bridge
+    ulimits:
+      nofile: 1024
+    ports:
+      # Host port changed from 8080 to 8088 — conflict with checkmk
+      - "8088:8080"
+      - "22222:22222"
+    restart: always
+    environment:
+      JOLOKIA_BASIC_AUTH: ${JOLOKIA_BASIC_AUTH}

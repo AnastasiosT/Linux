@@ -1,0 +1,17 @@
+services:
+  n8n:
+    build: .
+    container_name: n8n
+    restart: unless-stopped
+    network_mode: "host"
+    environment:
+      - GENERIC_TIMEZONE=Europe/Berlin
+      - TZ=Europe/Berlin
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_COMMUNITY_PACKAGES_ENABLED=true
+      - NODE_TLS_REJECT_UNAUTHORIZED=0  # Add this line
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/opt/n8n-examples:ro
+volumes:
+  n8n_data:

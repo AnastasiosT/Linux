@@ -1,0 +1,202 @@
+---
+- hosts: all
+  tasks:
+
+  - name: Run `docker compose -f ldap.yaml up`
+    ansible.builtin.shell: sudo docker compose -f /home/anastasios/Docker/ldap.yaml up -d  
+    args:
+         executable: /bin/bash
+    become: true
+    become_user: root
+  #  - name: Run `docker compose -f ldap.yaml up` 
+  #    docker_compose:
+  #        project_src: /home/anastasios/Docker/
+  #        files:
+  #          - ldap.yaml
+  #        state: present
+  #    register: docker_compose
+  # #   # become: true
+  # #   # become_method: sudo
+  # #   # become_user: root
+  # #   tags:
+  # #     - start containers
+
+  #  - name: debug output for docker compose
+  #    debug:
+  #      var: docker_compose
+  #    tags: 
+  #      - debug
+
+
+
+
+  - name: copy root.crt to /usr/local/share/ca-certificates/
+    community.docker.docker_container_exec:
+      container: checkmk
+      argv:
+        - /bin/bash
+        - "-c"     
+        - "sudo cp /home/cert/root_ca.crt /usr/local/share/ca-certificates/"
+    tags:
+      - copy cert to container
+    register: copy_cert_to_container
+
+
+  - name: run update-ca-certificates to update the cert store
+    community.docker.docker_container_exec:
+      container: checkmk
+      argv:
+        - /bin/bash
+        - "-c" 
+        - "update-ca-certificates"
+    tags:
+        - update-ca-certificates
+    register: update_ca_certificates
+
+  - name: copy checkmk certs to site
+    community.docker.docker_container_exec:
+      container: checkmk
+      argv:
+       - /bin/bash
+       - "-c"
+       - "cp home/checkmk/config/ca-certificates.mk /omd/sites/ldap/etc/check_mk/multisite.d/wato"
+    tags:
+     - copy checkmk certs to site
+    register: copy_checkmk_certs_to_site
+
+
+  - name: copy ldap connection to site
+    community.docker.docker_container_exec:
+      container: checkmk
+      argv:
+       - /bin/bash
+       - "-c"
+       - "cp home/checkmk/config/user_connections.mk /omd/sites/ldap/etc/check_mk/multisite.d/wato"
+    tags:
+     - copy ldap connection to site
+    register: copy_ldap_connection_to_site
+
+
+
+  - name: change file Permissions
+    community.docker.docker_container_exec:
+      container: checkmk
+      argv:
+        - /bin/bash
+        - "-c"
+        - "chown ldap. /omd/sites/ldap/etc/check_mk/multisite.d/wato/*"
+
+  - name: update apache config
+    community.docker.docker_container_exec:
+     container: checkmk
+     argv:
+       - /bin/bash
+       - "-c"
+       - "omd update-apache-config ldap"
+    register: update_apache_config
+    tags:
+     - update apache config
+
+
+
+  - name: start checkmk
+    community.docker.docker_container_exec:
+      container: checkmk
+      argv:
+       - /bin/bash
+       - "-c"
+       - "omd start ldap"
+    register: restart_checkmk
+    tags: restart checkmk
+
+  - name: wait for restart to finish
+    ansible.builtin.wait_for:
+      port: 8090
+      host: localhost
+      delay: 10
+    connection: local
+    tags: 
+     - port checkmk
+    register: port_check
+
+
+ #Create several contact groups.
+  - name: "Create several contact groups."
+    checkmk.general.contact_group:
+      server_url: "http://172.70.0.2"
+      site: "ldap"
+      automation_user: "cmkadmin"
+      automation_secret: "cmk"
+      groups:
+        - name: "cmk-admins"
+          title: "cmk-admins"
+        - name: "cmk-normal"
+          title: "cmk-normal"
+        - name: "cmk-guest"
+          title: "cmk-guest"
+      state: "present"
+    register: debug_for_contact_groups
+    tags: 
+      - create contact groups
+
+
+# Activate changes
+  - name: "Activate Changes"
+    checkmk.general.activation:
+       server_url: "http://172.70.0.2"
+       site: "ldap"
+       automation_user: "cmkadmin"
+       automation_secret: "cmk"
+       force_foreign_changes: 'true'
+    run_once: 'true'
+    register: activate_changes
+    tags:
+      - activate changes
+
+
+
+
+
+  - name: stop docker compose containers
+    docker_compose:
+      project_src: /home/anastasios/Docker/
+      files:
+          - ldap.yaml
+      state: absent
+      remove_images: all
+      remove_volumes: true
+      debug: true
+    tags:
+      - delete containers
+
+
+  - name: copy_cert_to_container
+    debug:
+      msg: "{{copy_cert_to_container}}"
+  - name: update-ca-certificates
+    debug:
+      msg: "{{update_ca_certificates}}"
+  - name: debug for contact groups
+    debug:
+      msg: "{{debug_for_contact_groups}}"
+  - name: debug copy checkmk certs to site
+    debug:
+       msg: "{{copy_checkmk_certs_to_site}}"    
+  - name: copy ldap connection to site
+    debug:
+      msg: "{{copy_ldap_connection_to_site}}"
+  - name: update apache config
+    debug:
+      msg: "{{update_apache_config}}"
+  - name: restart checkmk
+    debug:
+      msg: "{{restart_checkmk}}"
+  - name: activate changes
+    debug:
+      msg: "{{activate_changes}}"
+  - name: port checkmk
+    debug: 
+      msg: "{{port_check}}"
+  
+
+#https://docs.ansible.com/ansible/latest/collections/community/docker/docker_compose_module.html

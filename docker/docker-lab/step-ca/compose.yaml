@@ -1,0 +1,15 @@
+services:
+  step-ca:
+    image: ubuntu:latest
+    container_name: step-ca
+    ports:
+      - "9443:9443"
+    volumes:
+      - ./step-ca.sh:/usr/local/bin/step-ca.sh
+      - ./certificates:/home/step
+    command: step-ca.sh
+    environment:
+      TZ: America/New_York
+      DOCKER_STEPCA_INIT_NAME: Smallstep
+      DOCKER_STEPCA_INIT_DNS_NAMES: localhost
+      DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT: "true"

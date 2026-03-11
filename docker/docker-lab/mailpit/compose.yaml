@@ -1,0 +1,25 @@
+services:
+  mailpit:
+    image: axllent/mailpit
+    container_name: mailpit
+    restart: unless-stopped
+    volumes:
+      - ../data:/data
+      - ./klapp_0130.crt:/klapp_0130.crt
+      - ./klapp_0130.key:/klapp_0130.key
+    ports:
+      - "8025:8025"
+      - "1025:1025"
+      - "1110:1110"
+    environment:
+      TZ: Europe/London
+      MP_MAX_MESSAGES: 5000
+      MP_DATABASE: /data/mailpit.db
+      MP_SMTP_AUTH_ACCEPT_ANY: "false"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "false"
+      MP_SMTP_AUTH: ${MP_SMTP_AUTH}
+      MP_SMTP_REQUIRE_TLS: "false"
+      MP_SMTP_REQUIRE_STARTTLS: "true"
+      MP_SMTP_TLS_CERT: /klapp_0130.crt
+      MP_SMTP_TLS_KEY: /klapp_0130.key
+      MP_POP3_AUTH: ${MP_POP3_AUTH}

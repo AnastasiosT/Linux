@@ -1,0 +1,28 @@
+services:
+  checkmk:
+    image: checkmk/check-mk-enterprise:1.5.0p25
+    container_name: checkmk
+    tmpfs:
+      - /opt/omd/sites/ldap/tmp:uid=1000,gid=1000
+    ulimits:
+      nofile: 1024
+    volumes:
+      - checkmk-storage:/omd/sites
+      - /etc/localtime:/etc/localtime:ro
+      - ../openldap:/home
+    ports:
+      - "8080:80"
+      - "8090:5000"
+      - "6557:6557"
+      - "7555:6555"
+      - "8000:8000"
+    environment:
+      CMK_PASSWORD: ${CMK_PASSWORD}
+      CMK_LIVESTATUS_TCP: "on"
+    restart: always
+    # NOTE: verify this IP matches the actual openldap container (ldap stack subnet is 172.18.0.0/16)
+    extra_hosts:
+      - "openldap.local:172.19.0.3"
+
+volumes:
+  checkmk-storage:

@@ -1,0 +1,5 @@
+# You'll have these files:
+# 1. docker-compose.yaml          (Docker setup)
+# 2. complete-snipeit-setup.sh    (All-in-one setup)
+# 3. assets-inventory.txt         (Your asset list)
+# 4. add-assets-from-file.sh      (Add more assets later)

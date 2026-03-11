@@ -1,0 +1,15 @@
+services:
+  mysql:
+    image: ubuntu:latest
+    container_name: mysql
+    restart: on-failure
+    tty: true
+    ports:
+      - "33060:33060"
+    volumes:
+      - ./mysql_compose.sh:/usr/local/bin/mysql.sh
+      - ../new_mysql_instance.sh:/tmp/new_mysql_instance.sh
+      - ../check-mk-agent_2.2.0p17-dd01c84fc0f4b99b_all.deb:/tmp/check-mk-agent_2.2.0p17-dd01c84fc0f4b99b_all.deb
+      - ./mk_mysql:/tmp/mk_mysql
+      - ./mysql.cfg:/etc/check_mk/mysql.cfg
+    command: mysql.sh

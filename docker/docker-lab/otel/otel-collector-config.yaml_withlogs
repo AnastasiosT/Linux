@@ -1,0 +1,131 @@
+receivers:
+  # Scrape Prometheus node exporter for system metrics
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: node-exporter
+          scrape_interval: 30s
+          static_configs:
+            - targets:
+                - node-exporter:9100
+
+  # Collect host metrics from the collector container itself
+  hostmetrics:
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      memory:
+      disk:
+      filesystem:
+      network:
+      load:
+
+  # Collect Docker container logs
+  filelog:
+    include:
+      - /var/lib/docker/containers/*/*.log
+    include_file_path: true
+    include_file_name: false
+    operators:
+      # Parse Docker JSON logs
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.time
+          layout: '%Y-%m-%dT%H:%M:%S.%LZ'
+      # Extract container name from file path
+      - type: regex_parser
+        regex: '^.*containers/(?P<container_id>[^/]+)/.*\.log$'
+        parse_from: attributes["log.file.path"]
+      # Add container metadata
+      - type: add
+        field: resource["container.id"]
+        value: EXPR(attributes["container_id"])
+
+  # Collect system logs (syslog)
+  filelog/syslog:
+    include:
+      - /var/log/syslog
+      - /var/log/messages
+      - /var/log/auth.log
+    start_at: end
+    operators:
+      - type: regex_parser
+        regex: '^(?P<timestamp>\w+\s+\d+\s+\d+:\d+:\d+)\s+(?P<hostname>\S+)\s+(?P<process>\S+?)(\[(?P<pid>\d+)\])?: (?P<message>.*)$'
+        timestamp:
+          parse_from: attributes.timestamp
+          layout: '%b %d %H:%M:%S'
+      - type: move
+        from: attributes.message
+        to: body
+      - type: add
+        field: attributes.log.source
+        value: "syslog"
+
+processors:
+  batch:
+    timeout: 10s
+  
+  # Add resource attributes to identify the source
+  resource:
+    attributes:
+      - key: service.name
+        value: docker-metrics-collector
+        action: upsert
+      - key: deployment.environment
+        value: testing
+        action: upsert
+      - key: host.name
+        value: docker-host
+        action: upsert
+  
+  # Filter logs to reduce noise (optional)
+  #filter/critical_logs:
+  #  logs:
+  #    log_record:
+  #      # Only send ERROR, CRITICAL, FATAL logs
+  #      # Comment this out to send all logs
+  #      - 'severity_text != "ERROR" and severity_text != "CRITICAL" and severity_text != "FATAL"'
+
+exporters:
+  # Send metrics to Checkmk
+  otlp/checkmk:
+    endpoint: "192.168.178.25:4317"  # CHANGE THIS to your Checkmk server
+    tls:
+      insecure: true
+    timeout: 30s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+  
+  # Debug output to see what's being sent
+  debug:
+    verbosity: normal
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+service:
+  pipelines:
+    # Metrics pipeline (existing)
+    metrics:
+      receivers:
+        - prometheus
+        - hostmetrics
+      processors:
+        - resource
+        - batch
+      exporters:
+        - debug
+        - otlp/checkmk
+    
+    # Logs pipeline (new)
+    logs:
+      receivers:
+        - filelog
+        - filelog/syslog
+      processors:
+        - resource
+        - batch
+      exporters:  # ADD THIS
+        - debug
+        - otlp/checkmk

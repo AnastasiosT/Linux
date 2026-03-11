@@ -1,0 +1,37 @@
+services:
+  prometheus:
+    image: prom/prometheus
+    container_name: prometheus
+    volumes:
+      - "./prometheus.yml:/etc/prometheus/prometheus.yml"
+      - "./rules.yml:/etc/prometheus/rules.yml"
+    networks:
+      localprom:
+        ipv4_address: 172.20.0.3
+    ports:
+      - 9090:9090
+  node-exporter:
+    image: prom/node-exporter
+    container_name: node-exporter
+    networks:
+      localprom:
+        ipv4_address: 172.20.0.4
+    ports:
+      - 9100:9100
+  alert-manager:
+    image: prom/alertmanager
+    container_name: alertmanager
+    volumes:
+      - "./alertmanager.yml:/alertmanager/alertmanager.yml"
+    networks:
+      localprom:
+        ipv4_address: 172.20.0.2
+    ports:
+      - 9093:9093
+networks:
+  localprom:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1
