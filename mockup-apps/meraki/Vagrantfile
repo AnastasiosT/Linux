@@ -1,0 +1,122 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# Vagrant box for the Meraki mock.
+# Provider : libvirt (KVM)
+# Box      : bento/ubuntu-24.04
+#
+# ── Configuration ────────────────────────────────────────────────────────────
+# To add more "customers", edit docker/meraki-mock/app.py and add entries
+# to the TENANTS dict. Each tenant gets its own API key — no extra VMs needed.
+#
+MOCK_IP  = "192.168.126.10"
+NET_NAME = "mockup-meraki"
+
+ENV['VAGRANT_DEFAULT_PROVIDER'] = 'libvirt'
+ENV['VAGRANT_NO_PARALLEL']      = 'yes'
+
+Vagrant.configure("2") do |config|
+  config.vm.define "meraki-mock", primary: true do |srv|
+    srv.vm.box      = "bento/ubuntu-24.04"
+    srv.vm.hostname = "meraki-mock"
+    srv.vm.disk :disk, size: "20GB", primary: true
+
+    # ── Networking ─────────────────────────────────────────────────────────────
+    srv.vm.network "private_network",
+      ip:                       MOCK_IP,
+      libvirt__network_name:    NET_NAME,
+      libvirt__dhcp_enabled:    false,
+      libvirt__forward_mode:    "route"
+
+    srv.ssh.insert_key = false
+
+    # ── Provider ───────────────────────────────────────────────────────────────
+    srv.vm.provider "libvirt" do |lv|
+      lv.default_prefix = "test_"
+      lv.description    = "meraki-mock (multi-tenant via API keys)"
+      lv.memory         = 1024
+      lv.cpus           = 1
+      lv.title          = "meraki-mock"
+      lv.keymap         = "en-us"
+      lv.memorybacking :access, :mode => "shared"
+      lv.memorybacking :source, :type => "memfd"
+    end
+
+    # ── Provision: Docker ──────────────────────────────────────────────────────
+    srv.vm.provision "shell", name: "docker", inline: <<~SHELL
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+
+      apt-get update -qq
+      apt-get install -y -qq ca-certificates curl gnupg
+
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+      chmod a+r /etc/apt/keyrings/docker.gpg
+
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+        https://download.docker.com/linux/ubuntu \
+        $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+        | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+      apt-get update -qq
+      apt-get install -y -qq --no-install-recommends docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+      usermod -aG docker vagrant
+      systemctl enable --now docker
+      echo "Docker $(docker --version) installed."
+    SHELL
+
+    # ── Provision: build and start mock ───────────────────────────────────────
+    srv.vm.provision "shell", name: "mock", privileged: false, inline: <<~SHELL
+      set -euo pipefail
+
+      mkdir -p ~/docker/meraki-mock
+      rsync -a --exclude='.vagrant' /vagrant/docker/meraki-mock/ ~/docker/meraki-mock/
+      cd ~/docker/meraki-mock
+
+      # Generate cert once — reuse on subsequent rebuilds so the trusted cert never rotates
+      # cert/ is persisted on the host so it survives vagrant destroy/up
+      mkdir -p /vagrant/cert
+      if [ -f /vagrant/cert/cert.pem ] && [ -f /vagrant/cert/key.pem ]; then
+        echo "Restoring certificate from /vagrant/cert/..."
+        cp /vagrant/cert/cert.pem ~/docker/meraki-mock/cert.pem
+        cp /vagrant/cert/key.pem  ~/docker/meraki-mock/key.pem
+      else
+        echo "Generating TLS certificate for api.meraki.com..."
+        openssl req -x509 -newkey rsa:2048 -nodes \
+          -keyout ~/docker/meraki-mock/key.pem \
+          -out    ~/docker/meraki-mock/cert.pem \
+          -days 3650 \
+          -subj "/CN=api.meraki.com" \
+          -addext "subjectAltName=DNS:api.meraki.com" 2>/dev/null
+        cp ~/docker/meraki-mock/cert.pem /vagrant/cert/cert.pem
+        cp ~/docker/meraki-mock/key.pem  /vagrant/cert/key.pem
+        echo "Certificate generated and saved to /vagrant/cert/."
+      fi
+
+      sg docker -c "/usr/bin/docker compose build --pull"
+      sg docker -c "/usr/bin/docker compose up -d"
+
+      echo ""
+      echo "══════════════════════════════════════════════════════"
+      echo "  Meraki mock running at https://#{MOCK_IP}"
+      echo ""
+      echo "  API keys (configure in Checkmk special agent rules):"
+      echo "    key-customer-a  →  Customer-A org"
+      echo "    key-customer-b  →  Customer-B org"
+      echo ""
+      echo "  Add more customers: edit docker/meraki-mock/app.py → TENANTS"
+      echo ""
+      echo "  Import cert into CheckMK:"
+      echo "  cp cert/cert.pem /omd/sites/<site>/etc/ssl/ca-certificates/meraki-mock.crt"
+      echo "  omd reload <site>"
+      echo "══════════════════════════════════════════════════════"
+    SHELL
+
+    # ── Sync shared folder ──────────────────────────────────────────────────────
+    srv.vm.synced_folder ".", "/vagrant", type: "rsync",
+      rsync__exclude: [".vagrant/", "*.pyc", "__pycache__/"]
+  end
+end

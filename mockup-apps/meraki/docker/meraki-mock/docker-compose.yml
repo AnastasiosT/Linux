@@ -1,0 +1,12 @@
+services:
+
+  meraki-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: meraki-mock
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    environment:
+      - PYTHONUNBUFFERED=1

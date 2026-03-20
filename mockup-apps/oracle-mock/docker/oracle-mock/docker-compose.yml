@@ -1,0 +1,19 @@
+services:
+
+  oracle-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: oracle-mock
+    restart: unless-stopped
+    ports:
+      - "6556:6556"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; s=socket.create_connection(('localhost',6556),timeout=5); data=s.recv(64); s.close(); exit(0 if b'check_mk' in data else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s

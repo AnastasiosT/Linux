@@ -1,0 +1,179 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# Vagrant box for the Redfish mock.
+# Provider : libvirt (KVM)
+# Box      : bento/ubuntu-24.04
+#
+# ── Configuration ────────────────────────────────────────────────────────────
+# Set the number of mock instances. Each gets its own IP:
+#   1 → 192.168.127.10
+#   2 → 192.168.127.10, 192.168.127.11
+#   3 → 192.168.127.10, 192.168.127.11, 192.168.127.12  …
+#
+NUM_MOCKS  = 1
+BASE_IP    = "192.168.127"
+START_OCT  = 10
+NET_NAME   = "mockup-redfish"
+
+# Derived list of IPs
+MOCK_IPS = (0...NUM_MOCKS).map { |i| "#{BASE_IP}.#{START_OCT + i}" }
+
+ENV['VAGRANT_DEFAULT_PROVIDER'] = 'libvirt'
+ENV['VAGRANT_NO_PARALLEL']      = 'yes'
+
+Vagrant.configure("2") do |config|
+  config.vm.define "redfish-mock", primary: true do |srv|
+    srv.vm.box      = "bento/ubuntu-24.04"
+    srv.vm.hostname = "redfish-mock"
+    srv.vm.disk :disk, size: "20GB", primary: true
+
+    # ── Networking ─────────────────────────────────────────────────────────────
+    srv.vm.network "private_network",
+      ip:                       MOCK_IPS[0],
+      libvirt__network_name:    NET_NAME,
+      libvirt__dhcp_enabled:    false,
+      libvirt__forward_mode:    "route"
+
+    srv.ssh.insert_key = false
+
+    # ── Provider ───────────────────────────────────────────────────────────────
+    srv.vm.provider "libvirt" do |lv|
+      lv.default_prefix = "test_"
+      lv.description    = "redfish-mock (#{NUM_MOCKS} instance(s))"
+      lv.memory         = 1024
+      lv.cpus           = 1
+      lv.title          = "redfish-mock"
+      lv.keymap         = "en-us"
+      lv.memorybacking :access, :mode => "shared"
+      lv.memorybacking :source, :type => "memfd"
+    end
+
+    # ── Provision: Docker ──────────────────────────────────────────────────────
+    srv.vm.provision "shell", name: "docker", inline: <<~SHELL
+      set -euo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+
+      apt-get update -qq
+      apt-get install -y -qq ca-certificates curl gnupg
+
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+      chmod a+r /etc/apt/keyrings/docker.gpg
+
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+        https://download.docker.com/linux/ubuntu \
+        $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+        | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+      apt-get update -qq
+      apt-get install -y -qq --no-install-recommends docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+      usermod -aG docker vagrant
+      systemctl enable --now docker
+      echo "Docker $(docker --version) installed."
+    SHELL
+
+    # ── Provision: secondary IPs (netplan) ────────────────────────────────────
+    if NUM_MOCKS > 1
+      secondary_ips = MOCK_IPS[1..].join(" ")
+      srv.vm.provision "shell", name: "secondary-ips", inline: <<~SHELL
+        set -euo pipefail
+
+        IFACE=$(ip -o addr show | awk '/#{MOCK_IPS[0]}/ {print $2}')
+        echo "Adding secondary IPs to interface: $IFACE"
+
+        cat > /etc/netplan/60-redfish-mock-secondaries.yaml << EOF
+        network:
+          version: 2
+          ethernets:
+            $IFACE:
+              addresses:
+        #{MOCK_IPS[1..].map { |ip| "          - #{ip}/24" }.join("\n")}
+        EOF
+
+        chmod 600 /etc/netplan/60-redfish-mock-secondaries.yaml
+        netplan apply
+        echo "Secondary IPs configured: #{secondary_ips}"
+      SHELL
+    end
+
+    # ── Provision: generate docker-compose and start mocks ────────────────────
+    services = MOCK_IPS.each_with_index.map do |ip, i|
+      n = i + 1
+      block = <<~SVC
+        redfish-mock-#{n}:
+          build:
+            context: .
+            dockerfile: Dockerfile
+          container_name: redfish-mock-#{n}
+          ports:
+            - "#{ip}:443:443"
+          environment:
+            - PYTHONUNBUFFERED=1
+            - EXTRA_SANS=IP:#{ip},DNS:redfish-mock-#{n}
+          restart: unless-stopped
+          healthcheck:
+            test: ["CMD", "python", "-c",
+                   "import urllib.request, ssl; ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE; urllib.request.urlopen('https://localhost/redfish/v1', context=ctx)"]
+            interval: 10s
+            timeout:  5s
+            retries:  3
+      SVC
+      block.gsub(/^/, "  ")
+    end
+
+    compose_content = "services:\n#{services.join("\n")}\n"
+
+    srv.vm.provision "shell", name: "mock", privileged: false,
+      env: { "COMPOSE_CONTENT" => compose_content },
+      inline: <<~SHELL
+        set -euo pipefail
+
+        mkdir -p ~/docker/redfish-mock
+        rsync -a --exclude='.vagrant' /vagrant/docker/redfish-mock/ ~/docker/redfish-mock/
+        cd ~/docker/redfish-mock
+
+        echo "$COMPOSE_CONTENT" > docker-compose.yml
+
+        sg docker -c "/usr/bin/docker compose build --pull"
+        sg docker -c "/usr/bin/docker compose up -d"
+
+        # ── Wait for certs and export them ──────────────────────────────────
+        #{MOCK_IPS.each_with_index.map { |ip, i|
+          n = i + 1
+          <<~WAIT
+            echo "Waiting for cert on redfish-mock-#{n} (#{ip})..."
+            for j in $(seq 1 30); do
+              if sg docker -c "/usr/bin/docker exec redfish-mock-#{n} test -f /app/cert.pem" 2>/dev/null; then
+                echo "  redfish-mock-#{n}: certificate ready."
+                break
+              fi
+              echo "  (${j}/30) not ready yet..."
+              sleep 2
+            done
+            sg docker -c "/usr/bin/docker exec redfish-mock-#{n} cat /app/cert.pem" \
+              > ~/docker/redfish-mock/redfish-mock-#{n}.crt
+            cp ~/docker/redfish-mock/redfish-mock-#{n}.crt /vagrant/redfish-mock-#{n}.crt
+          WAIT
+        }.join("\n")}
+
+        echo ""
+        echo "══════════════════════════════════════════════════════"
+        #{MOCK_IPS.each_with_index.map { |ip, i|
+          n = i + 1
+          "echo \"  [#{n}] https://#{ip}  →  cert: redfish-mock-#{n}.crt\""
+        }.join("\n        ")}
+        echo ""
+        echo "  Import certs into CheckMK:"
+        echo "  cp redfish-mock-*.crt /omd/sites/<site>/etc/ssl/ca-certificates/"
+        echo "  omd reload <site>"
+        echo "══════════════════════════════════════════════════════"
+      SHELL
+
+    # ── Sync shared folder ──────────────────────────────────────────────────────
+    srv.vm.synced_folder ".", "/vagrant", type: "rsync",
+      rsync__exclude: [".vagrant/", "*.pyc", "__pycache__/"]
+  end
+end

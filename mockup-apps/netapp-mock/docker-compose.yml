@@ -1,0 +1,26 @@
+services:
+  netapp-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: netapp-mock
+    ports:
+      - "443:443"
+    volumes:
+      - netapp-certs:/app/certs
+    environment:
+      # EXTRA_SANS: "IP:0.0.0.0"
+      LOG_LEVEL: "info"
+      GUNICORN_WORKERS: "2"
+      GUNICORN_THREADS: "4"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsk", "https://localhost/api/cluster"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  netapp-certs:
+    driver: local

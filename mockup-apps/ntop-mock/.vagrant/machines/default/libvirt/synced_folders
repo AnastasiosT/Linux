@@ -1,0 +1,1 @@
+{"rsync":{"/vagrant":{"type":"rsync","rsync__exclude":[".vagrant/","*.pyc","__pycache__/"],"guestpath":"/vagrant","hostpath":"/home/anastasios/vagrant/mockup-apps/ntop-mock","disabled":false,"__vagrantfile":true,"exclude":[".vagrant/","*.pyc","__pycache__/"],"owner":"vagrant","group":"vagrant"}}}

@@ -1,0 +1,173 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+#
+# Vagrant box for the Oracle Checkmk-agent mock.
+# Provider : libvirt (KVM)
+# Box      : bento/ubuntu-24.04
+#
+# The mock exposes a plain-text Checkmk agent on TCP 6556 per instance.
+# Checkmk connects as it would to a real host running mk_oracle.
+#
+# ── Configuration ────────────────────────────────────────────────────────────
+# Set the number of mock instances. Each gets its own IP:
+#   1 → 192.168.126.10
+#   2 → 192.168.126.10, 192.168.126.11
+#
+NUM_MOCKS = 1
+BASE_IP   = "192.168.126"
+START_OCT = 10
+NET_NAME  = "mockup-oracle"
+
+MOCK_IPS = (0...NUM_MOCKS).map { |i| "#{BASE_IP}.#{START_OCT + i}" }
+
+Vagrant.configure("2") do |config|
+  config.vm.box      = "bento/ubuntu-24.04"
+  config.vm.hostname = "oracle-mock"
+
+  # ── Networking ─────────────────────────────────────────────────────────────
+  config.vm.network "private_network",
+    ip:                       MOCK_IPS[0],
+    libvirt__network_name:    NET_NAME,
+    libvirt__dhcp_enabled:    false,
+    libvirt__forward_mode:    "route"
+
+  # ── Provider ───────────────────────────────────────────────────────────────
+  config.vm.provider :libvirt do |lv|
+    lv.driver         = "kvm"
+    lv.memory         = 512
+    lv.cpus           = 1
+    lv.disk_bus       = "virtio"
+    lv.nic_model_type = "virtio"
+    lv.title          = "oracle-mock"
+    lv.description    = "Oracle mk_oracle agent mock for Checkmk (#{NUM_MOCKS} instance(s))"
+  end
+
+  # ── Provision: Docker ──────────────────────────────────────────────────────
+  config.vm.provision "shell", name: "docker", inline: <<~SHELL
+    set -euo pipefail
+    export DEBIAN_FRONTEND=noninteractive
+
+    apt-get update -qq
+    apt-get install -y -qq ca-certificates curl gnupg
+
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+      | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+      https://download.docker.com/linux/ubuntu \
+      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" \
+      | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+    apt-get update -qq
+    apt-get install -y -qq --no-install-recommends docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+    usermod -aG docker vagrant
+    systemctl enable --now docker
+    echo "Docker $(docker --version) installed."
+  SHELL
+
+  # ── Provision: secondary IPs (netplan) ─────────────────────────────────────
+  if NUM_MOCKS > 1
+    secondary_ips = MOCK_IPS[1..].join(" ")
+    config.vm.provision "shell", name: "secondary-ips", inline: <<~SHELL
+      set -euo pipefail
+
+      IFACE=$(ip -o addr show | awk '/#{MOCK_IPS[0]}/ {print $2}')
+      echo "Adding secondary IPs to interface: $IFACE"
+
+      cat > /etc/netplan/60-oracle-mock-secondaries.yaml << EOF
+      network:
+        version: 2
+        ethernets:
+          $IFACE:
+            addresses:
+      #{MOCK_IPS[1..].map { |ip| "          - #{ip}/24" }.join("\n")}
+      EOF
+
+      chmod 600 /etc/netplan/60-oracle-mock-secondaries.yaml
+      netplan apply
+      echo "Secondary IPs configured: #{secondary_ips}"
+    SHELL
+  end
+
+  # ── Provision: generate docker-compose and start mocks ─────────────────────
+  services = MOCK_IPS.each_with_index.map do |ip, i|
+    n = i + 1
+    hostname = NUM_MOCKS == 1 ? "oracle-mock" : "oracle-mock-#{n}"
+    block = <<~SVC
+      oracle-mock-#{n}:
+        build:
+          context: .
+          dockerfile: Dockerfile
+        container_name: oracle-mock-#{n}
+        ports:
+          - "#{ip}:6556:6556"
+        environment:
+          - PYTHONUNBUFFERED=1
+        command: ["python", "agent.py", "--host", "0.0.0.0", "--port", "6556",
+                  "--hostname", "#{hostname}"]
+        restart: unless-stopped
+        healthcheck:
+          test: ["CMD", "python", "-c",
+                 "import socket; s=socket.create_connection(('localhost',6556),timeout=5); data=s.recv(64); s.close(); exit(0 if b'check_mk' in data else 1)"]
+          interval: 30s
+          timeout: 10s
+          retries: 3
+          start_period: 5s
+    SVC
+    block.gsub(/^/, "  ")
+  end
+
+  compose_content = "services:\n#{services.join("\n")}\n"
+
+  config.vm.provision "shell", name: "mock", privileged: false,
+    env: { "COMPOSE_CONTENT" => compose_content },
+    inline: <<~SHELL
+      set -euo pipefail
+
+      mkdir -p ~/docker/oracle-mock
+      rsync -a --exclude='.vagrant' /vagrant/docker/oracle-mock/ ~/docker/oracle-mock/
+      cd ~/docker/oracle-mock
+
+      echo "$COMPOSE_CONTENT" > docker-compose.yml
+
+      sg docker -c "/usr/bin/docker compose build --pull"
+      sg docker -c "/usr/bin/docker compose up -d"
+
+      echo "Waiting for oracle-mock-1 to be ready..."
+      for j in $(seq 1 30); do
+        if sg docker -c "/usr/bin/docker exec oracle-mock-1 python -c \
+            'import socket; s=socket.create_connection((\"localhost\",6556),timeout=3); data=s.recv(32); s.close(); exit(0 if b\"check_mk\" in data else 1)'" 2>/dev/null; then
+          echo "  oracle-mock-1: ready."
+          break
+        fi
+        echo "  (${j}/30) not ready yet..."
+        sleep 2
+      done
+
+      echo ""
+      echo "══════════════════════════════════════════════════════"
+      #{MOCK_IPS.each_with_index.map { |ip, i|
+        n = i + 1
+        "echo \"  [#{n}] #{ip}:6556  (oracle-mock-#{n})\""
+      }.join("\n      ")}
+      echo ""
+      echo "  Protocol: Checkmk agent (plain TCP, no TLS)"
+      echo "  SIDs:     ORCL (primary CDB), ORCLPDB (PDB)"
+      echo ""
+      echo "  Checkmk Setup > Hosts > Add host:"
+      echo "    Hostname/IP   : <IP above>"
+      echo "    Agent type    : Checkmk agent"
+      echo "    No encryption : enable (Global Settings > Agent encryption)"
+      echo ""
+      echo "  Then: Service Discovery → finds oracle_instance, oracle_tablespaces, ..."
+      echo "  Apply mk_oracle rule: Setup > Agents > Agent rules > Oracle databases"
+      echo "══════════════════════════════════════════════════════"
+    SHELL
+
+  # ── Sync shared folder ──────────────────────────────────────────────────────
+  config.vm.synced_folder ".", "/vagrant", type: "rsync",
+    rsync__exclude: [".vagrant/", "*.pyc", "__pycache__/"]
+end

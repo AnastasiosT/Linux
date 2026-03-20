@@ -1,0 +1,18 @@
+services:
+
+  redfish-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: redfish-mock
+    restart: unless-stopped
+    ports:
+      - "443:443"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request, ssl; ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE; urllib.request.urlopen('https://localhost/redfish/v1', context=ctx)"]
+      interval: 10s
+      timeout:  5s
+      retries:  3

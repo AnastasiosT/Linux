@@ -1,0 +1,19 @@
+services:
+
+  ntop-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ntop-mock
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request, base64; req=urllib.request.Request('http://localhost:3000/lua/rest/version.lua'); req.add_header('Authorization','Basic '+base64.b64encode(b'admin:admin').decode()); urllib.request.urlopen(req)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
